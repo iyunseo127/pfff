@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>교안 AI 분석기 - 요약 및 문제 추출</title>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- PDF.js -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
+  <style>
+    .loader {
+      border: 4px solid #f3f3f3;
+      border-top: 4px solid #3b82f6;
+      border-radius: 50%;
+      width: 40px;
+      height: 40px;
+      animation: spin 1s linear infinite;
+    }
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+  </style>
+</head>
+<body class="bg-gray-100 min-h-screen text-gray-800 font-sans">
+
+  <div class="max-w-4xl mx-auto p-6 md:py-10">
+    <header class="mb-8 text-center">
+      <h1 class="text-3xl font-bold text-blue-600 mb-2">교안 AI 분석기</h1>
+      <p class="text-gray-600">PDF 교안을 요약하고 10개의 예상 문제를 자동으로 추출합니다.</p>
+    </header>
+
+    <!-- API 키 설정 영역 -->
+    <div id="apiKeySection" class="bg-white p-6 rounded-xl shadow-sm border border-gray-200 mb-6 hidden">
+      <h2 class="text-lg font-semibold mb-2">🔑 Gemini API 키 설정</h2>
+      <p class="text-sm text-gray-500 mb-4">API 키는 사용자의 브라우저(localStorage)에만 안전하게 보관됩니다.</p>
+      <div class="flex gap-2">
+        <input type="password" id="apiKeyInput" placeholder="AIzaSy..." class="flex-1 border border-gray-300 rounded-lg p-3 focus:ring-2 focus:ring-blue-500 outline-none transition">
+        <button onclick="saveApiKey()" class="bg-blue-600 text-white px-5 py-3 rounded-lg hover:bg-blue-700 transition font-medium">저장</button>
+      </div>
+    </div>
+
+    <!-- 파일 업로드 영역 -->
+    <div id="uploadSection" class="bg-white p-6 rounded-xl shadow-sm border border-gray-200 mb-6 hidden">
+      <div class="flex justify-between items-center mb-4">
+        <h2 class="text-lg font-semibold">📄 PDF 파일 업로드</h2>
+        <button onclick="resetApiKey()" class="text-sm text-gray-400 hover:text-red-500 transition underline">API 키 재설정</button>
+      </div>
+      <div class="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center hover:bg-gray-50 transition cursor-pointer" onclick="document.getElementById('pdfFile').click()">
+        <input type="file" id="pdfFile" accept="application/pdf" class="hidden" onchange="updateFileName()">
+        <div id="fileName" class="text-gray-500">클릭하여 PDF 파일을 선택하거나 드래그 앤 드롭하세요.</div>
+      </div>
+      <button onclick="processPDF()" class="w-full mt-4 bg-gray-800 text-white px-4 py-3 rounded-lg font-semibold hover:bg-black transition">요약 및 문제 추출 시작</button>
+    </div>
+
+    <!-- 로딩 상태 -->
+    <div id="loadingSection" class="hidden flex flex-col items-center justify-center py-12">
+      <div class="loader mb-4"></div>
+      <p class="text-gray-600 font-medium" id="loadingText">PDF 텍스트를 분석 중입니다...</p>
+    </div>
+
+    <!-- 결과 영역 -->
+    <div id="resultSection" class="hidden space-y-6">
+      <div class="flex justify-end">
+        <button onclick="exportToWord()" class="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition shadow-sm font-medium flex items-center gap-2">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
+          Word 파일로 다운로드
+        </button>
+      </div>
+
+      <div class="bg-white p-8 rounded-xl shadow-sm border border-gray-200">
+        <h2 class="text-xl font-bold text-gray-800 mb-4 border-b pb-2">📝 핵심 요약</h2>
+        <div id="summaryContent" class="text-gray-700 leading-relaxed whitespace-pre-line text-lg"></div>
+      </div>
+
+      <div class="bg-white p-8 rounded-xl shadow-sm border border-gray-200">
+        <h2 class="text-xl font-bold text-gray-800 mb-6 border-b pb-2">🎯 예상 문제 (10문항)</h2>
+        <div id="questionsContent" class="space-y-8"></div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
+
+    document.addEventListener("DOMContentLoaded", () => {
+      const apiKey = localStorage.getItem('gemini_api_key');
+      if (apiKey) {
+        document.getElementById('uploadSection').classList.remove('hidden');
+      } else {
+        document.getElementById('apiKeySection').classList.remove('hidden');
+      }
+    });
+
+    function saveApiKey() {
+      const key = document.getElementById('apiKeyInput').value.trim();
+      if (!key) return alert('API 키를 입력해주세요.');
+      localStorage.setItem('gemini_api_key', key);
+      document.getElementById('apiKeySection').classList.add('hidden');
+      document.getElementById('uploadSection').classList.remove('hidden');
+    }
+
+    function resetApiKey() {
+      if(confirm('저장된 API 키를 삭제하시겠습니까?')) {
+        localStorage.removeItem('gemini_api_key');
+        document.getElementById('uploadSection').classList.add('hidden');
+        document.getElementById('apiKeySection').classList.remove('hidden');
+        document.getElementById('apiKeyInput').value = '';
+      }
+    }
+
+    function updateFileName() {
+      const fileInput = document.getElementById('pdfFile');
+      const fileNameDiv = document.getElementById('fileName');
+      if (fileInput.files.length > 0) {
+        fileNameDiv.innerHTML = `<span class="font-semibold text-blue-600">${fileInput.files[0].name}</span> 파일이 선택되었습니다.`;
+      }
+    }
+
+    async function processPDF() {
+      const fileInput = document.getElementById('pdfFile');
+      if (!fileInput.files.length) return alert('PDF 파일을 선택해주세요.');
+      
+      const file = fileInput.files[0];
+      toggleLoading(true, "PDF 텍스트를 추출하는 중입니다...");
+
+      try {
+        const text = await extractTextFromPDF(file);
+        if(!text.trim()) throw new Error("PDF에서 텍스트를 읽을 수 없습니다. 스캔본인지 확인해주세요.");
+        
+        toggleLoading(true, "AI가 내용을 분석하고 문제를 출제하고 있습니다...");
+        await generateContent(text);
+      } catch (error) {
+        console.error(error);
+        alert('오류 발생: ' + error.message);
+      } finally {
+        toggleLoading(false);
+      }
+    }
+
+    async function extractTextFromPDF(file) {
+      const arrayBuffer = await file.arrayBuffer();
+      const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+      let fullText = "";
+      for (let i = 1; i <= pdf.numPages; i++) {
+        const page = await pdf.getPage(i);
+        const textContent = await page.getTextContent();
+        fullText += textContent.items.map(item => item.str).join(" ") + "\n";
+      }
+      return fullText;
+    }
+
+    async function generateContent(text) {
+      const apiKey = localStorage.getItem('gemini_api_key');
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+
+      const prompt = `
+        다음 텍스트를 분석하여 핵심 내용을 요약하고, 객관식 4지선다 예상문제 10개를 출제해.
+        반드시 순수 JSON 문자열만 반환할 것. (Markdown 백틱 제거)
+        {
+          "summary": "교안의 전체 주요 내용을 3~5문단으로 요약",
+          "questions": [
+            {
+              "question": "문제 내용",
+              "options": ["보기1", "보기2", "보기3", "보기4"],
+              "answer": 1,
+              "explanation": "해설"
+            }
+          ]
+        }
+        교안 텍스트: ${text.substring(0, 30000)}
+      `;
+
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: { response_mime_type: "application/json" }
+        })
+      });
+
+      if (!response.ok) throw new Error('API 호출 실패. 한도 초과 또는 잘못된 키일 수 있습니다.');
+      const data = await response.json();
+      const resultData = JSON.parse(data.candidates[0].content.parts[0].text);
+      renderResults(resultData);
+      
+      // 전역 변수에 저장 (내보내기 용)
+      window.generatedData = resultData;
+    }
+
+    function renderResults(data) {
+      document.getElementById('resultSection').classList.remove('hidden');
+      document.getElementById('summaryContent').textContent = data.summary;
+      
+      const questionsContainer = document.getElementById('questionsContent');
+      questionsContainer.innerHTML = '';
+
+      data.questions.forEach((q, index) => {
+        const optionsHtml = q.options.map((opt, i) => `
+          <div class="flex items-center gap-3 mb-2 p-2 rounded hover:bg-gray-50 transition">
+            <span class="w-7 h-7 flex items-center justify-center rounded-full bg-gray-200 text-sm font-medium text-gray-700">${i + 1}</span>
+            <span class="text-gray-700 ${(i + 1) === q.answer ? 'font-bold text-blue-600' : ''}">${opt}</span>
+          </div>
+        `).join('');
+
+        const html = `
+          <div class="border border-gray-100 rounded-xl p-5 bg-gray-50/50">
+            <p class="font-bold text-lg mb-4 text-gray-800">Q${index + 1}. ${q.question}</p>
+            <div class="mb-4 pl-2">
+              ${optionsHtml}
+            </div>
+            <div class="mt-4 p-4 bg-blue-50/50 border border-blue-100 rounded-lg text-sm text-blue-900">
+              <span class="font-bold inline-block mb-1">정답: ${q.answer}번</span><br>
+              <span class="leading-relaxed opacity-90">${q.explanation}</span>
+            </div>
+          </div>
+        `;
+        questionsContainer.insertAdjacentHTML('beforeend', html);
+      });
+    }
+
+    function exportToWord() {
+      if (!window.generatedData) return alert("먼저 PDF를 분석해주세요.");
+      
+      const data = window.generatedData;
+      let htmlContent = `
+        <html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'>
+        <head><meta charset='utf-8'><title>교안 분석 결과</title></head>
+        <body style="font-family: 'Malgun Gothic', sans-serif;">
+          <h1 style="color: #2563eb;">핵심 요약</h1>
+          <p style="line-height: 1.6;">${data.summary.replace(/\n/g, '<br>')}</p>
+          <br><hr><br>
+          <h1 style="color: #2563eb;">예상 문제</h1>
+      `;
+
+      data.questions.forEach((q, idx) => {
+        htmlContent += `
+          <div style="margin-bottom: 20px;">
+            <h3>Q${idx + 1}. ${q.question}</h3>
+            <ol style="line-height: 1.8;">
+              ${q.options.map((opt, i) => `<li>${opt}${(i+1) === q.answer ? '<b>(정답)</b>' : ''}</li>`).join('')}
+            </ol>
+            <div style="background-color: #f3f4f6; padding: 10px; margin-top: 10px;">
+              <b>정답: ${q.answer}번</b><br>
+              해설: ${q.explanation}
+            </div>
+          </div>
+        `;
+      });
+      htmlContent += `</body></html>`;
+
+      const blob = new Blob(['\ufeff', htmlContent], { type: 'application/msword' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `교안_분석결과_${new Date().getTime()}.doc`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    }
+
+    function toggleLoading(show, text = "") {
+      const loader = document.getElementById('loadingSection');
+      const loadText = document.getElementById('loadingText');
+      if (show) {
+        loader.classList.remove('hidden');
+        loadText.textContent = text;
+        document.getElementById('resultSection').classList.add('hidden');
+      } else {
+        loader.classList.add('hidden');
+      }
+    }
+  </script>
+</body>
+</html>
