@@ -36,7 +36,7 @@
       <h2 class="text-lg font-semibold mb-2">🔑 Gemini API 키 설정</h2>
       <p class="text-sm text-gray-500 mb-4">API 키는 사용자의 브라우저(localStorage)에만 안전하게 보관됩니다.</p>
       <div class="flex gap-2">
-        <input type="password" id="apiKeyInput" placeholder="AIzaSy..." class="flex-1 border border-gray-300 rounded-lg p-3 focus:ring-2 focus:ring-blue-500 outline-none transition">
+        <input type="password" id="apiKeyInput" placeholder="API 키를 입력하세요..." class="flex-1 border border-gray-300 rounded-lg p-3 focus:ring-2 focus:ring-blue-500 outline-none transition">
         <button onclick="saveApiKey()" class="bg-blue-600 text-white px-5 py-3 rounded-lg hover:bg-blue-700 transition font-medium">저장</button>
       </div>
     </div>
@@ -153,7 +153,8 @@
 
     async function generateContent(text) {
       const apiKey = localStorage.getItem('gemini_api_key');
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+      // 1.0 pro 모델 엔드포인트 적용
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.0-pro:generateContent?key=${apiKey}`;
 
       const prompt = `
         다음 텍스트를 분석하여 핵심 내용을 요약하고, 객관식 4지선다 예상문제 10개를 출제해.
@@ -176,14 +177,20 @@
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: { response_mime_type: "application/json" }
+          contents: [{ parts: [{ text: prompt }] }]
+          // 1.0 버전 호환을 위해 JSON 강제 출력 옵션 제거됨
         })
       });
 
-      if (!response.ok) throw new Error('API 호출 실패. 한도 초과 또는 잘못된 키일 수 있습니다.');
+      if (!response.ok) throw new Error('API 호출 실패. 상태 코드: ' + response.status);
+      
       const data = await response.json();
-      const resultData = JSON.parse(data.candidates[0].content.parts[0].text);
+      let resultText = data.candidates[0].content.parts[0].text;
+      
+      // 마크다운 잔여물 제거 (안전한 JSON 파싱을 위함)
+      resultText = resultText.replace(/```json/g, '').replace(/```/g, '').trim();
+      
+      const resultData = JSON.parse(resultText);
       renderResults(resultData);
       
       // 전역 변수에 저장 (내보내기 용)
